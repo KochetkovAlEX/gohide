@@ -1,1 +1,3 @@
-# gohide
+# GoHide
+
+Simple TUI vpn application
