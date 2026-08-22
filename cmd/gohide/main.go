@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"gohide/internal/parser"
+	"gohide/internal/vpn"
 	"log"
 	"os"
 
@@ -25,8 +26,15 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// show all urls in config
+	var cfgArray []vpn.RawConfig
 	for _, value := range parser.DecodeString(decode) {
-		fmt.Println(value)
+		cfgStruct, err := vpn.ParseLine(value)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		} else {
+			cfgArray = append(cfgArray, cfgStruct)
+		}
 	}
+	fmt.Printf("Prepared %d configs", len(cfgArray))
 }
