@@ -36,7 +36,7 @@ func GetMapByCountryNames(configs []RawConfig) (map[string]RawConfig, error) {
 	if len(configs) < 1 {
 		return nil, fmt.Errorf("Config list is empty")
 	}
-	var names map[string]RawConfig
+	names := make(map[string]RawConfig)
 	for _, cfg := range configs {
 		names[cfg.Name] = cfg
 	}

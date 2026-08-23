@@ -2,12 +2,14 @@ package vpn
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 )
 
-func buildProxySettings(configName string, configMap map[string]RawConfig) Outbound {
-	var chosenConfig RawConfig = configMap[configName]
+func buildProxySettings(chosenConfig RawConfig) Outbound {
 	portInt, _ := strconv.Atoi(chosenConfig.Port)
 
 	myProxy := Outbound{
@@ -21,7 +23,7 @@ func buildProxySettings(configName string, configMap map[string]RawConfig) Outbo
 		PacketEncoding: "xudp",
 		TLS: &TLSConfig{
 			Enabled:    true,
-			ServerName: chosenConfig.SNI,
+			ServerName: "rutube.ru",
 			UTLS: &UTLSConfig{
 				Enabled:     true,
 				Fingerprint: "chrome",
@@ -36,8 +38,8 @@ func buildProxySettings(configName string, configMap map[string]RawConfig) Outbo
 	return myProxy
 }
 
-func BuildConfig(configName string, configMap map[string]RawConfig) {
-	myProxy := buildProxySettings(configName, configMap)
+func BuildConfig(chosenConfig RawConfig) error {
+	myProxy := buildProxySettings(chosenConfig)
 
 	fullConfig := Config{
 		Log: &LogConfig{Level: "info", Timestamp: true},
@@ -64,13 +66,40 @@ func BuildConfig(configName string, configMap map[string]RawConfig) {
 		Route: &RouteConfig{
 			Rules: []RouteRule{
 				{Action: "sniff"},
-				{Protocol: "dns", Action: "hijack-dns"},
+				{Action: "hijack-dns", Protocol: "dns"},
 			},
 			Final:                 "proxy", // Указывает на tag "proxy" нашего сервера
 			DefaultDomainResolver: "dns_proxy",
 			AutoDetectInterface:   true,
 		},
 	}
-	jsonBytes, _ := json.MarshalIndent(fullConfig, "", "  ")
-	os.WriteFile(configName+"_config.json", jsonBytes, 0644)
+	jsonBytes, err := json.MarshalIndent(fullConfig, "", "  ")
+	if err != nil {
+		return fmt.Errorf("Json Error: %v", err)
+	}
+
+	var baseDir string
+	exePath, err := os.Executable()
+
+	if err == nil && !strings.Contains(exePath, "go-build") {
+		baseDir = filepath.Dir(exePath)
+	} else {
+		baseDir, err = os.Getwd()
+		if err != nil {
+			baseDir = "."
+		}
+	}
+
+	configDir := filepath.Join(baseDir, "cfg")
+
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("не удалось создать директорию: %v", err)
+	}
+
+	finalFilePath := filepath.Join(configDir, chosenConfig.Name+"_config.json")
+	if err := os.WriteFile(finalFilePath, jsonBytes, 0644); err != nil {
+		return fmt.Errorf("Can`t write json file: %v", err)
+	}
+
+	return nil
 }

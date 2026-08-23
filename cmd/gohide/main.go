@@ -30,11 +30,19 @@ func main() {
 	for _, value := range parser.DecodeString(decode) {
 		cfgStruct, err := vpn.ParseLine(value)
 		if err != nil {
-			fmt.Println(err)
 			continue
 		} else {
 			cfgArray = append(cfgArray, cfgStruct)
 		}
 	}
 	fmt.Printf("Prepared %d configs", len(cfgArray))
+
+	names, err := vpn.GetMapByCountryNames(cfgArray)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// for key, _ := range names {
+	// 	fmt.Println(key)
+	// }
+	vpn.BuildConfig(names["🇩🇰 ⭐️ Дания"])
 }
