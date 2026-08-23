@@ -10,7 +10,6 @@ import (
 )
 
 func ParseDataFromUrl(url string) (string, error) {
-	// Используем кастомный клиент, чтобы выставить User-Agent как у curl
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
