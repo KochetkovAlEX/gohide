@@ -24,7 +24,7 @@ func ParseDataFromUrl(url string) (string, error) {
 
 			// check redirects
 			if len(via) >= 10 {
-				return fmt.Errorf("To many redirect")
+				return fmt.Errorf("[ERROR] To many redirect")
 			}
 			return nil
 		},

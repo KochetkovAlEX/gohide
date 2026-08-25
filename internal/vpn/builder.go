@@ -38,7 +38,7 @@ func buildProxySettings(chosenConfig RawConfig) Outbound {
 	return myProxy
 }
 
-func BuildConfig(chosenConfig RawConfig) error {
+func BuildConfig(chosenConfig RawConfig) (string, error) {
 	myProxy := buildProxySettings(chosenConfig)
 
 	fullConfig := Config{
@@ -75,7 +75,7 @@ func BuildConfig(chosenConfig RawConfig) error {
 	}
 	jsonBytes, err := json.MarshalIndent(fullConfig, "", "  ")
 	if err != nil {
-		return fmt.Errorf("Json Error: %v", err)
+		return "", fmt.Errorf("[ERROR] Json Error: %v", err)
 	}
 
 	var baseDir string
@@ -93,13 +93,13 @@ func BuildConfig(chosenConfig RawConfig) error {
 	configDir := filepath.Join(baseDir, "cfg")
 
 	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return fmt.Errorf("не удалось создать директорию: %v", err)
+		return "", fmt.Errorf("[ERROR] Can`t create folder: %v", err)
 	}
 
 	finalFilePath := filepath.Join(configDir, chosenConfig.Name+"_config.json")
 	if err := os.WriteFile(finalFilePath, jsonBytes, 0644); err != nil {
-		return fmt.Errorf("Can`t write json file: %v", err)
+		return "", fmt.Errorf("[ERROR] Can`t write json file: %v", err)
 	}
 
-	return nil
+	return finalFilePath, nil
 }

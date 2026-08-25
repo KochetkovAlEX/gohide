@@ -12,7 +12,7 @@ func ParseLine(urlString string) (RawConfig, error) {
 		return RawConfig{}, err
 	}
 	if u.Scheme != "vless" {
-		return RawConfig{}, fmt.Errorf("Protocol is not allowed")
+		return RawConfig{}, fmt.Errorf("[ERROR] Protocol is not allowed")
 	}
 
 	query := u.Query()
@@ -34,7 +34,7 @@ func ParseLine(urlString string) (RawConfig, error) {
 
 func GetMapByCountryNames(configs []RawConfig) (map[string]RawConfig, error) {
 	if len(configs) < 1 {
-		return nil, fmt.Errorf("Config list is empty")
+		return nil, fmt.Errorf("[ERROR] Config list is empty")
 	}
 	names := make(map[string]RawConfig)
 	for _, cfg := range configs {
