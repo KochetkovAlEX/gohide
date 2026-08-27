@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"os"
@@ -58,18 +59,35 @@ func (m Model) pingAll() tea.Cmd {
 	var cmds []tea.Cmd
 	for i, s := range m.servers {
 		m.pings[i] = "Ping..."
-		cmds = append(cmds, m.pingServerCmd(i, s.Address, s.Port))
+
+		sni := s.SNI // Замени на свое поле, если оно называется иначе (например, s.Host)
+		if sni == "" {
+			sni = s.Address
+		}
+
+		cmds = append(cmds, m.pingServerCmd(i, s.Address, s.Port, sni))
 	}
 	return tea.Batch(cmds...)
 }
 
-func (m Model) pingServerCmd(index int, host, port string) tea.Cmd {
+func (m Model) pingServerCmd(index int, host, port, sni string) tea.Cmd {
 	return func() tea.Msg {
 		start := time.Now()
-		conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), 2*time.Second)
+
+		dialer := &net.Dialer{
+			Timeout: 3 * time.Second,
+		}
+
+		tlsConfig := &tls.Config{
+			ServerName:         sni,
+			InsecureSkipVerify: true,
+		}
+
+		conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(host, port), tlsConfig)
 		if err != nil {
 			return pingMsg{index: index, err: err}
 		}
+
 		_ = conn.Close()
 		return pingMsg{index: index, rtt: time.Since(start)}
 	}
@@ -126,7 +144,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "right", "l":
 			m.pings[m.cursor] = "Ping..."
-			return m, m.pingServerCmd(m.cursor, m.servers[m.cursor].Address, m.servers[m.cursor].Port)
+			return m, m.pingServerCmd(m.cursor, m.servers[m.cursor].Address, m.servers[m.cursor].Port, m.servers[m.cursor].SNI)
 
 		case "t":
 			// Глобальный переключатель режима
