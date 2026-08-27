@@ -39,8 +39,6 @@ func ParseDataFromUrl(url string) (string, error) {
 
 	defer resp.Body.Close()
 
-	fmt.Println("[Status]", resp.StatusCode)
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err

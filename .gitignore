@@ -27,3 +27,6 @@ go.work.sum
 .idea/
 .vscode/
 *.json
+
+gohide
+internal/bin/sing-box

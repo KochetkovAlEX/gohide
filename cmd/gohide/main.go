@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"gohide/internal/bin"
@@ -116,17 +117,24 @@ func main() {
 	}
 
 	// Подготавливаем временный бинарник sing-box
-	binaryBytes := bin.SingBoxWidows
+	binaryBytes := bin.SingBoxBinary
 	tempDir := os.TempDir()
-	execPath := filepath.Join(tempDir, "sing-box.exe")
 
+	// Определяем имя файла в зависимости от ОС
+	execName := "sing-box"
+	if runtime.GOOS == "windows" {
+		execName += ".exe"
+		binaryBytes = bin.SingBoxWidows
+	}
+	execPath := filepath.Join(tempDir, execName)
+
+	// Права 0755 критически важны для Linux (дает право на исполнение)
 	writeErr := os.WriteFile(execPath, binaryBytes, 0755)
 	if writeErr != nil {
 		fmt.Printf("[ERROR] Sing-box unpacking error: %v\n", writeErr)
 		return
 	}
-	defer os.Remove(execPath) // Бинарник удалится при закрытии программы
-
+	defer os.Remove(execPath)
 	// Инициализируем и запускаем основной интерфейс
 	initialModel := tui.NewModel(cfgArray, execPath)
 
