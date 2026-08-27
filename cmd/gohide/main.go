@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"gohide/internal/bin"
 	"gohide/internal/parser"
+	"gohide/internal/tui"
 	"gohide/internal/vpn"
 	"log"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 
-	_ "charm.land/bubbletea/v2"
+	tea "charm.land/bubbletea/v2"
 	_ "charm.land/lipgloss/v2"
 	_ "github.com/charmbracelet/bubbles"
 	"github.com/joho/godotenv"
@@ -70,28 +70,33 @@ func main() {
 	}
 	defer os.Remove(execPath)
 
-	// sing-box activationg.
-	cmd := exec.Command(execPath, "run", "-c", configPath)
-	// cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	initialModel := tui.NewModel(cfgArray, execPath)
 
-	fmt.Printf("[INFO] Start sing-box with config: %s\n", configPath)
-	fmt.Println("[INFO] GoHide Start Working")
-	if err := cmd.Start(); err != nil {
-		fmt.Printf("[ERROR] Exec error: %v\n", err)
+	// Запускаем TUI. Используем AltScreen, чтобы интерфейс открывался на отдельном "экране",
+	// и после выхода (q) терминал возвращался в исходное состояние.
+	p := tea.NewProgram(initialModel)
+	if _, err := p.Run(); err != nil {
+		log.Fatalf("Ошибка запуска интерфейса: %v", err)
 	}
 
-	go func() {
-		_ = cmd.Wait()
-	}()
+	// // sing-box activationg.
+	// cmd := exec.Command(execPath, "run", "-c", configPath)
+	// // cmd.Stdout = os.Stdout
+	// cmd.Stderr = os.Stderr
 
-	//ЗАГЛУШКА ПОКА НЕТ ИНТЕРФЕЙСА
+	// fmt.Printf("[INFO] Start sing-box with config: %s\n", configPath)
+	// fmt.Println("[INFO] GoHide Start Working")
+	// if err := cmd.Start(); err != nil {
+	// 	fmt.Printf("[ERROR] Exec error: %v\n", err)
+	// }
 
-	fmt.Scanln()
+	// go func() {
+	// 	_ = cmd.Wait()
+	// }()
 
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}
+	// if cmd.Process != nil {
+	// 	_ = cmd.Process.Kill()
+	// 	_ = cmd.Wait()
+	// }
 
 }
