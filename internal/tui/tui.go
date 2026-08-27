@@ -23,9 +23,11 @@ type Model struct {
 	servers       []vpn.RawConfig
 	pings         []string
 	cursor        int
-	offset        int // Индекс, с которого начинается отрисовка списка (для скролла)
-	height        int // Высота терминала
+	offset        int
+	height        int
 	activeIdx     int
+	selectedMode  string // Выбранный режим для следующего запуска ("proxy" или "tun")
+	activeMode    string // В каком режиме реально запущен текущий сервер
 	activeCmd     *exec.Cmd
 	activeCfgPath string
 	execPath      string
@@ -34,20 +36,21 @@ type Model struct {
 func NewModel(configs []vpn.RawConfig, execPath string) Model {
 	pings := make([]string, len(configs))
 	for i := range pings {
-		pings[i] = "-" // По умолчанию пинг не замерен
+		pings[i] = "-"
 	}
 	return Model{
-		servers:   configs,
-		pings:     pings,
-		cursor:    0,
-		offset:    0,
-		activeIdx: -1,
-		execPath:  execPath,
+		servers:      configs,
+		pings:        pings,
+		cursor:       0,
+		offset:       0,
+		activeIdx:    -1,
+		selectedMode: "proxy", // По умолчанию всегда стартуем с proxy
+		activeMode:   "",
+		execPath:     execPath,
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	// Автоматический пинг при старте убран по твоей просьбе
 	return nil
 }
 
@@ -75,7 +78,6 @@ func (m Model) pingServerCmd(index int, host, port string) tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
-	// Ловим изменение размера окна терминала для скролла
 	case tea.WindowSizeMsg:
 		m.height = msg.Height
 		return m, nil
@@ -93,7 +95,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// Вычисляем, сколько строк списка помещается на экране (минус шапка и подвал)
 		visibleLines := m.height - 8
 		if visibleLines < 1 {
 			visibleLines = 1
@@ -107,7 +108,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
-				// Если курсор ушел выше видимой зоны, двигаем окно скролла вверх
 				if m.cursor < m.offset {
 					m.offset = m.cursor
 				}
@@ -116,7 +116,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			if m.cursor < len(m.servers)-1 {
 				m.cursor++
-				// Если курсор ушел ниже видимой зоны, двигаем окно скролла вниз
 				if m.cursor >= m.offset+visibleLines {
 					m.offset = m.cursor - visibleLines + 1
 				}
@@ -126,18 +125,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.pingAll()
 
 		case "right", "l":
-			// Пинг только конкретного конфига (стрелка вправо)
 			m.pings[m.cursor] = "Ping..."
 			return m, m.pingServerCmd(m.cursor, m.servers[m.cursor].Address, m.servers[m.cursor].Port)
 
+		case "t":
+			// Глобальный переключатель режима
+			if m.selectedMode == "proxy" {
+				m.selectedMode = "tun"
+			} else {
+				m.selectedMode = "proxy"
+			}
+			return m, nil
+
 		case "enter", "space":
 			if m.activeIdx == m.cursor {
+				// Выключаем, если нажали на уже активный сервер
 				m.stopSingBox()
 			} else {
+				// Тушим старый процесс перед запуском нового
 				m.stopSingBox()
 
 				chosen := m.servers[m.cursor]
-				configPath, err := vpn.BuildConfig(chosen)
+				var configPath string
+				var err error
+
+				// Собираем конфиг на основе глобального флага
+				if m.selectedMode == "tun" {
+					configPath, err = vpn.BuildTunConfig(chosen)
+				} else {
+					configPath, err = vpn.BuildConfig(chosen)
+				}
+
 				if err != nil {
 					return m, nil
 				}
@@ -145,6 +163,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := exec.Command(m.execPath, "run", "-c", configPath)
 				if err := cmd.Start(); err == nil {
 					m.activeIdx = m.cursor
+					m.activeMode = m.selectedMode
 					m.activeCmd = cmd
 					m.activeCfgPath = configPath
 
@@ -165,6 +184,7 @@ func (m *Model) stopSingBox() {
 		_ = os.Remove(m.activeCfgPath)
 	}
 	m.activeIdx = -1
+	m.activeMode = ""
 	m.activeCmd = nil
 	m.activeCfgPath = ""
 }
@@ -182,7 +202,12 @@ func (m Model) View() tea.View {
 		Padding(0, 1).
 		MarginTop(1)
 
-	s := titleStyle.Render("🛡️  GoHide VPN Client ") + "\n\n"
+	// Показываем текущий выбранный режим запуска прямо в заголовке
+	modeDisplay := "PROXY"
+	if m.selectedMode == "tun" {
+		modeDisplay = "TUN"
+	}
+	s := titleStyle.Render(fmt.Sprintf("🛡️  GoHide VPN Client | Mode: %s", modeDisplay)) + "\n\n"
 
 	visibleLines := m.height - 8
 	if visibleLines < 1 {
@@ -222,13 +247,18 @@ func (m Model) View() tea.View {
 		s += row + "\n"
 	}
 
+	// Статус отображает режим, в котором РЕАЛЬНО работает текущее подключение
 	if m.activeIdx != -1 {
-		s += statusStyle.Foreground(lipgloss.Color("10")).Render(fmt.Sprintf(" STATUS: connecting to [%s]", m.servers[m.activeIdx].Name))
+		activeModeStr := "PROXY"
+		if m.activeMode == "tun" {
+			activeModeStr = "TUN"
+		}
+		s += statusStyle.Foreground(lipgloss.Color("10")).Render(fmt.Sprintf(" STATUS: connect to [%s] (Mode: %s)", m.servers[m.activeIdx].Name, activeModeStr))
 	} else {
 		s += statusStyle.Foreground(lipgloss.Color("7")).Render(" STATUS: VPN off")
 	}
 
-	s += "\n\n " + lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("↑/↓: Choose | Enter: On/Off | →: Ping | p: Ping all | q: Quit")
+	s += "\n\n " + lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("↑/↓: Choose | Enter: On/Off | t: Change mode | →: Ping | p: Ping All | q: Quite")
 
 	v := tea.NewView(s)
 	v.AltScreen = true

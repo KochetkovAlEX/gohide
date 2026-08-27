@@ -50,11 +50,11 @@ type Inbound struct {
 	Tag        string `json:"tag"`
 	Listen     string `json:"listen,omitempty"`      // Для прокси: "127.0.0.1"
 	ListenPort int    `json:"listen_port,omitempty"` // Для прокси: 10808
-	// Interface  string   `json:"interface,omitempty"`   // Для TUN: "tun0"
-	// Address    []string `json:"address,omitempty"`     // Для TUN: ["172.19.0.1/30"]
-	// AutoRoute  bool     `json:"auto_route,omitempty"`  // Для TUN: true
-	// Stack      string   `json:"stack,omitempty"`       // Для TUN: "system"
-	// Sniff      bool     `json:"sniff,omitempty"`       // Для TUN: true
+
+	Address     []string `json:"address,omitempty"`
+	AutoRoute   bool     `json:"auto_route,omitempty"`   // Для TUN: true
+	StrictRoute bool     `json:"strict_route,omitempty"` // Для TUN: true (улучшает перехват трафика)
+	Stack       string   `json:"stack,omitempty"`        // Для TUN: "system" или "gvisor"
 }
 
 type Outbound struct {

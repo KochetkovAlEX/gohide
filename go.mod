@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/charmbracelet/bubbles v1.0.0
+	github.com/atotto/clipboard v0.1.4
 	github.com/joho/godotenv v1.5.1
 )
 
