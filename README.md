@@ -25,11 +25,11 @@ A fast, terminal-based (TUI) VPN client built with Go and Bubble Tea, powered by
 
 ## 🗺️ Roadmap
 
-- [ ]**Hysteria 2 Support:** Planning to integrate the Hysteria 2 protocol.
-- [ ]**Log File Support:** Planning to add a logger.
-- [x]**Multiple Subscriptions:** Support for managing and aggregating multiple Subscription URLs.
-- [x]**New Login:** Rewrite start page.
-- [ ]**Press "R":** Add "Refresh subscriptions" button.
+- [ ] **Hysteria 2 Support:** Planning to integrate the Hysteria 2 protocol.
+- [ ] **Log File Support:** Planning to add a logger.
+- [x] **Multiple Subscriptions:** Support for managing and aggregating multiple Subscription URLs.
+- [x] **New Login:** Rewrite start page.
+- [ ] **Press "R":** Add "Refresh subscriptions" button.
 
 ## 🚀 Installation
 
