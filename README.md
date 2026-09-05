@@ -10,6 +10,9 @@ A fast, terminal-based (TUI) VPN client built with Go and Bubble Tea, powered by
 **Server Selection, Ping & TUN Mode:**
 ![List Demo](assets/list.gif)
 
+**If Subscription Already Exist::**
+![Red Text](assets/urlExist.gif)
+
 ## ✨ Features
 
 - **Sing-box Core:** Uses the powerful and lightweight `sing-box` engine under the hood.
