@@ -6,121 +6,56 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"gohide/internal/bin"
 	"gohide/internal/parser"
+	"gohide/internal/storage"
 	"gohide/internal/tui"
 	"gohide/internal/vpn"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
-	"github.com/atotto/clipboard"
-	"github.com/joho/godotenv"
 )
 
-// Мини-модель TUI для поля ввода ключа
-type inputModel struct {
-	url  string
-	done bool
-}
+// Функция, которая собирает и парсит конфиги из всех сохраненных в JSON подписок
+func loadAllConfigs() []vpn.RawConfig {
+	var combinedConfigs []vpn.RawConfig
 
-func (m inputModel) Init() tea.Cmd { return nil }
+	subs, err := storage.LoadSubscriptions()
+	if err != nil {
+		fmt.Printf("[ERROR] Ошибка загрузки подписок: %v\n", err)
+		return combinedConfigs
+	}
 
-func (m inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
+	for _, sub := range subs {
+		decode, err := parser.ParseDataFromUrl(sub.URL)
+		if err != nil {
+			// Если одна подписка недоступна, логируем и идем дальше
+			fmt.Printf("[WARN] Не удалось загрузить подписку '%s': %v\n", sub.Name, err)
+			continue
+		}
 
-	// Ловим системное событие вставки (если терминал его поддерживает)
-	case tea.PasteMsg:
-		m.url += msg.String()
-		return m, nil
-
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
-			m.done = true
-			return m, tea.Quit
-
-		case "backspace":
-			// Безопасное удаление символов
-			runes := []rune(m.url)
-			if len(runes) > 0 {
-				m.url = string(runes[:len(runes)-1])
+		for _, value := range parser.DecodeString(decode) {
+			cfgStruct, err := vpn.ParseLine(value)
+			if err != nil {
+				continue
 			}
-
-		case "ctrl+c", "esc":
-			os.Exit(0)
-
-		case "ctrl+v":
-			// Попытка прочитать из буфера ОС
-			text, err := clipboard.ReadAll()
-			if err == nil {
-				m.url += strings.TrimSpace(text)
-			}
-
-		default:
-			s := msg.String()
-			if len([]rune(s)) == 1 {
-				m.url += s
-			} else if s == "space" {
-				m.url += " "
-			}
+			// Для наглядности добавляем имя подписки перед именем самого сервера
+			cfgStruct.Name = fmt.Sprintf("[%s] %s", sub.Name, cfgStruct.Name)
+			combinedConfigs = append(combinedConfigs, cfgStruct)
 		}
 	}
-	return m, nil
-}
 
-func (m inputModel) View() tea.View {
-	if m.done {
-		return tea.NewView("") // Очищаем экран перед запуском основного TUI
-	}
-	title := lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true).Render("🔑 Config url:")
-	s := fmt.Sprintf("\n%s\n\n> %s\n\n(Ctrl+V for paste url | Enter for continue)", title, m.url)
-	return tea.NewView(s)
+	return combinedConfigs
 }
 
 func main() {
-	_ = godotenv.Load()
-	url := os.Getenv("URL")
-
-	if url == "" {
-		p := tea.NewProgram(inputModel{})
-		finalModel, err := p.Run()
-		if err != nil {
-			log.Fatalf("Input error: %v", err)
-		}
-
-		url = finalModel.(inputModel).url
-
-		// Сохраняем введенный ключ в файл .env
-		envMap, err := godotenv.Read()
-		if err != nil {
-			envMap = make(map[string]string) // Если файла нет, создаем новую мапу
-		}
-		envMap["URL"] = url
-		_ = godotenv.Write(envMap, ".env")
-	}
-
-	decode, err := parser.ParseDataFromUrl(url)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	var cfgArray []vpn.RawConfig
-	for _, value := range parser.DecodeString(decode) {
-		cfgStruct, err := vpn.ParseLine(value)
-		if err != nil {
-			continue
-		} else {
-			cfgArray = append(cfgArray, cfgStruct)
-		}
-	}
+	// Сразу собираем доступные сервера из сохраненных подписок
+	cfgArray := loadAllConfigs()
 
 	// Подготавливаем временный бинарник sing-box
 	binaryBytes := bin.SingBoxBinary
 	tempDir := os.TempDir()
 
-	// Определяем имя файла в зависимости от ОС
 	execName := "sing-box"
 	if runtime.GOOS == "windows" {
 		execName += ".exe"
@@ -128,17 +63,31 @@ func main() {
 	}
 	execPath := filepath.Join(tempDir, execName)
 
-	// Права 0755 критически важны для Linux (дает право на исполнение)
 	writeErr := os.WriteFile(execPath, binaryBytes, 0755)
 	if writeErr != nil {
-		fmt.Printf("[ERROR] Sing-box unpacking error: %v\n", writeErr)
-		return
+		log.Fatalf("[ERROR] Sing-box unpacking error: %v\n", writeErr)
 	}
 	defer os.Remove(execPath)
-	// Инициализируем и запускаем основной интерфейс
-	initialModel := tui.NewModel(cfgArray, execPath)
 
-	p := tea.NewProgram(initialModel)
+	var p *tea.Program
+
+	// Функция обновления (колбэк), вызываемая из TUI после успешного добавления подписки
+	reloadCallback := func() {
+		newConfigs := loadAllConfigs()
+		// Изменяем состояние программы внутри запущенного процесса Bubbletea
+		p.Send(func(model tea.Model) tea.Model {
+			if m, ok := model.(tui.Model); ok {
+				m.UpdateServers(newConfigs)
+				return m
+			}
+			return model
+		})
+	}
+
+	// Инициализируем основную модель с передачей колбэка
+	initialModel := tui.NewModel(cfgArray, execPath, reloadCallback)
+
+	p = tea.NewProgram(initialModel)
 	if _, err := p.Run(); err != nil {
 		log.Fatalf("Ошибка запуска интерфейса: %v", err)
 	}
