@@ -28,7 +28,7 @@ A fast, terminal-based (TUI) VPN client built with Go and Bubble Tea, powered by
 - [ ]**Hysteria 2 Support:** Planning to integrate the Hysteria 2 protocol.
 - [ ]**Log File Support:** Planning to add a logger.
 - [x]**Multiple Subscriptions:** Support for managing and aggregating multiple Subscription URLs.
-- [ ]**New Login:** Rewrite start page.
+- [x]**New Login:** Rewrite start page.
 - [ ]**Press "R":** Add "Refresh subscriptions" button.
 
 ## 🚀 Installation
@@ -82,10 +82,14 @@ If you prefer to build the project yourself, you will need [Go](https://go.dev/)
    git clone [https://github.com/KochetkovAlEX/gohide.git](https://github.com/KochetkovAlEX/gohide.git)
    cd gohide
    ```
-2. Building
+2. Preparing:
+   Install `sing-box v1.13.9` for linux or windows and upload the file to `internal/bin` folder.  
+
+3. Building
 
 - For windows:
   `go build -ldflags="-s -w" -o gohide.exe ./cmd/gohide`
 
 - For Linux:
   `GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o gohide ./cmd/gohide`
+
