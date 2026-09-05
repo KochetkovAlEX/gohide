@@ -6,7 +6,6 @@ require (
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/atotto/clipboard v0.1.4
-	github.com/joho/godotenv v1.5.1
 )
 
 require (
