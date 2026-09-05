@@ -174,21 +174,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.inputErr = "Fields cannot be blank!"
 					return m, nil
 				}
+
 				err := storage.SaveSubscription(m.inputName, m.inputURL)
 				if err != nil {
 					m.inputErr = err.Error()
 					return m, nil
 				}
+
+				if latestSubs, err := storage.LoadSubscriptions(); err == nil {
+					m.subs = latestSubs
+				}
+
 				m.inputName = ""
 				m.inputURL = ""
 				m.inputErr = ""
 				m.state = stateSubs
 				m.cursor = 0
 				m.offset = 0
-				if m.onReloadSubs != nil {
-					m.onReloadSubs()
-				}
-				return m, tea.ClearScreen
+
+				return m, nil
+
 
 			case "backspace":
 				if m.activeInput == 0 {
@@ -243,16 +248,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.inputErr = ""
 				return m, tea.ClearScreen
 
-			case "x": // Destructive state action to delete active entry card
+			case "x":
 				if len(m.subs) == 0 {
 					return m, nil
 				}
 				targetSub := m.subs[m.cursor]
+
 				_ = storage.DeleteSubscription(targetSub.Name)
-				if m.onReloadSubs != nil {
-					m.onReloadSubs()
+
+				if latestSubs, err := storage.LoadSubscriptions(); err == nil {
+					m.subs = latestSubs
 				}
-				return m, tea.ClearScreen
+
+				if m.cursor >= len(m.subs) && len(m.subs) > 0 {
+					m.cursor = len(m.subs) - 1
+				}
+				if len(m.subs) == 0 {
+					m.cursor = 0
+				}
+				m.offset = 0
+
+				return m, nil
+
 
 			case "up", "k":
 				if len(m.subs) == 0 {
@@ -465,7 +482,7 @@ func (m Model) View() tea.View {
 			s += lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(fmt.Sprintf("Error: %s", m.inputErr)) + "\n\n"
 		}
 
-		s += lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(" Tab/Arrows: Switch | Ctrl+V: Paste | Enter: Save | Esc: Cancel")
+		s += lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(" ↑/↓: Move | Ctrl+V: Paste | Enter: Save | Esc: Cancel")
 		v := tea.NewView(s)
 		v.AltScreen = true
 		return v

@@ -54,16 +54,16 @@ func main() {
 	var p *tea.Program
 
 	// Callback to trigger UI re-render when subscription database changes
-	reloadSubsCallback := func() {
-		subs, _ := storage.LoadSubscriptions()
-		p.Send(func(model tea.Model) tea.Model {
-			if m, ok := model.(tui.Model); ok {
-				m.UpdateSubscriptions(subs)
-				return m
-			}
-			return model
-		})
-	}
+	// reloadSubsCallback := func() {
+	// 	subs, _ := storage.LoadSubscriptions()
+	// 	p.Send(func(model tea.Model) tea.Model {
+	// 		if m, ok := model.(tui.Model); ok {
+	// 			m.UpdateSubscriptions(subs)
+	// 			return m
+	// 		}
+	// 		return model
+	// 	})
+	// }
 
 	// Dynamic on-demand configuration loader callback
 	loadConfigsCallback := func(url string) ([]vpn.RawConfig, error) {
@@ -77,7 +77,7 @@ func main() {
 	}
 
 	// Initialize UI model with updated arguments matching state machine needs
-	initialModel := tui.NewModel(subs, execPath, reloadSubsCallback, loadConfigsCallback)
+	initialModel := tui.NewModel(subs, execPath, nil, loadConfigsCallback)
 	p = tea.NewProgram(initialModel)
 	if _, err := p.Run(); err != nil {
 		log.Fatalf("UI execution error: %v", err)
