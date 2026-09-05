@@ -13,16 +13,20 @@ A fast, terminal-based (TUI) VPN client built with Go and Bubble Tea, powered by
 ## ✨ Features
 
 - **Sing-box Core:** Uses the powerful and lightweight `sing-box` engine under the hood.
-- **VLESS Support:** Automatically decodes and parses VLESS subscription URLs.
+- **Subscription Folders:** Easily organize and store multiple connection profiles inside a local JSON storage.
+- **VLESS Support:** Automatically decodes and parses VLESS subscription links.
 - **Dual Routing Modes:** Seamlessly switch between **Proxy** mode and global **TUN** mode.
 - **Built-in Ping:** Test server latency directly from the interface before connecting.
 - **Cross-Platform:** Fully supported on both Windows and Linux.
-- **Clipboard Support:** Easily paste your long subscription URLs using `Ctrl+V` or right-click.
+- **Clipboard Support:** Easily paste your long subscription URLs using `Ctrl+V` or native terminal paste commands without manual typing.
 
 ## 🗺️ Roadmap
 
-- **Hysteria 2 Support:** Planning to integrate the Hysteria 2 protocol.
-- **Log file support:** Planning to add a logger.
+- [ ]**Hysteria 2 Support:** Planning to integrate the Hysteria 2 protocol.
+- [ ]**Log File Support:** Planning to add a logger.
+- [x]**Multiple Subscriptions:** Support for managing and aggregating multiple Subscription URLs.
+- [ ]**New Login:** Rewrite start page.
+- [ ]**Press "R":** Add "Refresh subscriptions" button.
 
 ## 🚀 Installation
 
@@ -38,16 +42,26 @@ The easiest way to install GoHide is to download the pre-compiled binary for you
 
 Launch the executable from your terminal.
 
-On the first run, the app will prompt you to enter your VLESS subscription URL. This URL will be saved locally in a `.env` file for future use.
+On the first run, you will see an empty subscription explorer. Press `a` to open the addition form, type a custom folder title, and paste your VLESS subscription link. All profiles are stored safely on your machine inside a local `subs.json` file.
 
 ### Controls
 
-- `↑` / `↓`: Navigate the server list
-- `Enter`: Connect / Disconnect from the selected server
-- `t`: Toggle between **Proxy** and **TUN** mode
-- `→`: Ping the currently selected server
-- `p`: Ping all servers in the list
+**On Subscriptions Screen:**
+
+- `↑` / `↓`: Move selection indicator between subscription folders
+- `Enter` / `→`: Expand folder and dive into the nested servers list
+- `a`: Open the form to add a new subscription profile
+- `x`: Delete the currently highlighted subscription folder
 - `q` or `Ctrl+C`: Quit the application
+
+**On Servers Screen:**
+
+- `↑` / `↓`: Navigate the server nodes list
+- `Enter` / `Space`: Connect / Disconnect from the selected server
+- `t`: Toggle between **Proxy** and **TUN** mode for the upcoming connection
+- `→` / `l`: Ping the currently highlighted server node
+- `p`: Ping all servers within the active folder
+- `Esc` / `←`: Go back up to the primary subscription folders panel
 
 ### ⚠️ Important Note on TUN Mode
 

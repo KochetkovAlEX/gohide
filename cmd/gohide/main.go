@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -16,43 +15,26 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// Функция, которая собирает и парсит конфиги из всех сохраненных в JSON подписок
-func loadAllConfigs() []vpn.RawConfig {
-	var combinedConfigs []vpn.RawConfig
-
-	subs, err := storage.LoadSubscriptions()
+// FetchConfigsForSub requests and parses endpoints from a specific subscription URL
+func FetchConfigsForSub(url string) ([]vpn.RawConfig, error) {
+	var results []vpn.RawConfig
+	decode, err := parser.ParseDataFromUrl(url)
 	if err != nil {
-		fmt.Printf("[ERROR] Ошибка загрузки подписок: %v\n", err)
-		return combinedConfigs
+		return nil, err
 	}
 
-	for _, sub := range subs {
-		decode, err := parser.ParseDataFromUrl(sub.URL)
+	for _, value := range parser.DecodeString(decode) {
+		cfgStruct, err := vpn.ParseLine(value)
 		if err != nil {
-			// Если одна подписка недоступна, логируем и идем дальше
-			fmt.Printf("[WARN] Не удалось загрузить подписку '%s': %v\n", sub.Name, err)
 			continue
 		}
-
-		for _, value := range parser.DecodeString(decode) {
-			cfgStruct, err := vpn.ParseLine(value)
-			if err != nil {
-				continue
-			}
-			// Для наглядности добавляем имя подписки перед именем самого сервера
-			cfgStruct.Name = fmt.Sprintf("[%s] %s", sub.Name, cfgStruct.Name)
-			combinedConfigs = append(combinedConfigs, cfgStruct)
-		}
+		results = append(results, cfgStruct)
 	}
-
-	return combinedConfigs
+	return results, nil
 }
 
 func main() {
-	// Сразу собираем доступные сервера из сохраненных подписок
-	cfgArray := loadAllConfigs()
-
-	// Подготавливаем временный бинарник sing-box
+	// Prepare temporary sing-box binary based on current OS
 	binaryBytes := bin.SingBoxBinary
 	tempDir := os.TempDir()
 
@@ -71,24 +53,33 @@ func main() {
 
 	var p *tea.Program
 
-	// Функция обновления (колбэк), вызываемая из TUI после успешного добавления подписки
-	reloadCallback := func() {
-		newConfigs := loadAllConfigs()
-		// Изменяем состояние программы внутри запущенного процесса Bubbletea
+	// Callback to trigger UI re-render when subscription database changes
+	reloadSubsCallback := func() {
+		subs, _ := storage.LoadSubscriptions()
 		p.Send(func(model tea.Model) tea.Model {
 			if m, ok := model.(tui.Model); ok {
-				m.UpdateServers(newConfigs)
+				m.UpdateSubscriptions(subs)
 				return m
 			}
 			return model
 		})
 	}
 
-	// Инициализируем основную модель с передачей колбэка
-	initialModel := tui.NewModel(cfgArray, execPath, reloadCallback)
+	// Dynamic on-demand configuration loader callback
+	loadConfigsCallback := func(url string) ([]vpn.RawConfig, error) {
+		return FetchConfigsForSub(url)
+	}
 
+	// Initial fetch of local subscriptions from JSON
+	subs, err := storage.LoadSubscriptions()
+	if err != nil {
+		subs = []storage.Subscription{}
+	}
+
+	// Initialize UI model with updated arguments matching state machine needs
+	initialModel := tui.NewModel(subs, execPath, reloadSubsCallback, loadConfigsCallback)
 	p = tea.NewProgram(initialModel)
 	if _, err := p.Run(); err != nil {
-		log.Fatalf("Ошибка запуска интерфейса: %v", err)
+		log.Fatalf("UI execution error: %v", err)
 	}
 }

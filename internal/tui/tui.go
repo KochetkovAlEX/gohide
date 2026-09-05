@@ -25,11 +25,13 @@ type pingMsg struct {
 type uiState int
 
 const (
-	stateList uiState = iota // Экран списка серверов
-	stateAdd                 // Экран добавления подписки
+	stateSubs uiState = iota // Navigation panel for subscription lists
+	stateServers             // Dynamic detailed servers folder view
+	stateAdd                 // Clean profile creation entry form
 )
 
 type Model struct {
+	subs          []storage.Subscription
 	servers       []vpn.RawConfig
 	pings         []string
 	cursor        int
@@ -42,32 +44,32 @@ type Model struct {
 	activeCfgPath string
 	execPath      string
 
-	// Поля для работы с подписками
-	state        uiState
-	inputName    string
+	state         uiState
+	activeSubIdx  int
+	inputName     string
 	inputURL     string
-	activeInput  int // 0 - Name, 1 - URL
-	inputErr     string
-	onReloadSubs func() // Колбэк для перезагрузки данных в main
+	activeInput   int
+	inputErr      string
+	onReloadSubs  func()
+	onLoadConfigs func(url string) ([]vpn.RawConfig, error)
 }
 
-func NewModel(configs []vpn.RawConfig, execPath string, onReload func()) Model {
-	pings := make([]string, len(configs))
-	for i := range pings {
-		pings[i] = "-"
-	}
+func NewModel(subs []storage.Subscription, execPath string, onReload func(), onLoad func(string) ([]vpn.RawConfig, error)) Model {
 	return Model{
-		servers:      configs,
-		pings:        pings,
+		subs:          subs,
+		servers:       []vpn.RawConfig{},
+		pings:         []string{},
 		cursor:       0,
 		offset:       0,
 		activeIdx:    -1,
 		selectedMode: "proxy",
 		activeMode:   "",
 		execPath:     execPath,
-		state:        stateList,
+		state:        stateSubs,
 		activeInput:  0,
+		activeSubIdx: -1,
 		onReloadSubs: onReload,
+		onLoadConfigs: onLoad,
 	}
 }
 
@@ -110,18 +112,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case pingMsg:
-		if msg.err != nil {
-			m.pings[msg.index] = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("Error")
-		} else {
-			color := "10"
-			if msg.rtt > 150*time.Millisecond {
-				color = "11"
+		if m.state == stateServers {
+			if msg.err != nil {
+				m.pings[msg.index] = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("Error")
+			} else {
+				color := "10"
+				if msg.rtt > 150*time.Millisecond {
+					color = "11"
+				}
+				m.pings[msg.index] = lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(fmt.Sprintf("%dms", msg.rtt.Milliseconds()))
 			}
-			m.pings[msg.index] = lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(fmt.Sprintf("%dms", msg.rtt.Milliseconds()))
 		}
 		return m, nil
 
-		// Перед case tea.KeyMsg: вставьте этот блок:
 	case tea.PasteMsg:
 		if m.state == stateAdd {
 			if m.activeInput == 0 {
@@ -134,7 +137,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		// ----------------------------------------------------
-		// ЛОГИКА ЭКРАНА ДОБАВЛЕНИЯ ПОДПИСКИ
+		// SCREEN STATE: STATE_ADD (PROFILE FORM)
 		// ----------------------------------------------------
 		if m.state == stateAdd {
 			switch msg.String() {
@@ -142,8 +145,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.inputName = ""
 				m.inputURL = ""
 				m.inputErr = ""
-				m.state = stateList
-				return m, nil
+				m.state = stateSubs
+				m.cursor = 0
+				m.offset = 0
+				return m, tea.ClearScreen
 
 			case "tab", "up", "down":
 				if m.activeInput == 0 {
@@ -166,7 +171,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "enter":
 				if m.inputName == "" || m.inputURL == "" {
-					m.inputErr = "Поля не могут быть пустыми!"
+					m.inputErr = "Fields cannot be blank!"
 					return m, nil
 				}
 				err := storage.SaveSubscription(m.inputName, m.inputURL)
@@ -174,18 +179,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.inputErr = err.Error()
 					return m, nil
 				}
-
-				// Сохраняем перед очисткой состояния
 				m.inputName = ""
 				m.inputURL = ""
 				m.inputErr = ""
-				m.state = stateList
-
-				// Вызываем перезагрузку серверов в main.go
+				m.state = stateSubs
+				m.cursor = 0
+				m.offset = 0
 				if m.onReloadSubs != nil {
 					m.onReloadSubs()
 				}
-
 				return m, tea.ClearScreen
 
 			case "backspace":
@@ -207,11 +209,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(s) > 1 && s != "space" {
 					return m, nil
 				}
-
 				if s == "space" {
 					s = " "
 				}
-
 				if len([]rune(s)) == 1 {
 					if m.activeInput == 0 {
 						m.inputName += s
@@ -220,101 +220,181 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
-
 			}
 		}
 
 		// ----------------------------------------------------
-		// ЛОГИКА ОСНОВНОГО ЭКРАНА СЛУЖБЫ
+		// SCREEN STATE: STATE_SUBS (MAIN FOLDERS LIST)
 		// ----------------------------------------------------
-		visibleLines := m.height - 8
-		if visibleLines < 1 {
-			visibleLines = 1
-		}
-
-		switch msg.String() {
-		case "ctrl+c", "q":
-			m.stopSingBox()
-			return m, tea.Quit
-
-		case "a":
-			m.state = stateAdd
-			m.activeInput = 0
-			m.inputErr = ""
-			return m, nil
-
-		case "up", "k":
-			if len(m.servers) == 0 {
-				return m, nil
-			}
-			if m.cursor > 0 {
-				m.cursor--
-				if m.cursor < m.offset {
-					m.offset = m.cursor
-				}
+		if m.state == stateSubs {
+			visibleLines := m.height - 8
+			if visibleLines < 1 {
+				visibleLines = 1
 			}
 
-		case "down", "j":
-			if len(m.servers) == 0 {
-				return m, nil
-			}
-			if m.cursor < len(m.servers)-1 {
-				m.cursor++
-				if m.cursor >= m.offset+visibleLines {
-					m.offset = m.cursor - visibleLines + 1
-				}
-			}
-
-		case "p":
-			if len(m.servers) > 0 {
-				return m, m.pingAll()
-			}
-
-		case "right", "l":
-			if len(m.servers) > 0 {
-				m.pings[m.cursor] = "Ping..."
-				return m, m.pingServerCmd(m.cursor, m.servers[m.cursor].Address, m.servers[m.cursor].Port, m.servers[m.cursor].SNI)
-			}
-
-		case "t":
-			if m.selectedMode == "proxy" {
-				m.selectedMode = "tun"
-			} else {
-				m.selectedMode = "proxy"
-			}
-			return m, nil
-
-		case "enter", "space":
-			if len(m.servers) == 0 {
-				return m, nil
-			}
-			if m.activeIdx == m.cursor {
+			switch msg.String() {
+			case "ctrl+c", "q":
 				m.stopSingBox()
-			} else {
-				m.stopSingBox()
+				return m, tea.Quit
 
-				chosen := m.servers[m.cursor]
-				var configPath string
-				var err error
+			case "a":
+				m.state = stateAdd
+				m.activeInput = 0
+				m.inputErr = ""
+				return m, tea.ClearScreen
 
-				if m.selectedMode == "tun" {
-					configPath, err = vpn.BuildTunConfig(chosen)
-				} else {
-					configPath, err = vpn.BuildConfig(chosen)
-				}
-
-				if err != nil {
+			case "x": // Destructive state action to delete active entry card
+				if len(m.subs) == 0 {
 					return m, nil
 				}
+				targetSub := m.subs[m.cursor]
+				_ = storage.DeleteSubscription(targetSub.Name)
+				if m.onReloadSubs != nil {
+					m.onReloadSubs()
+				}
+				return m, tea.ClearScreen
 
-				cmd := exec.Command(m.execPath, "run", "-c", configPath)
-				if err := cmd.Start(); err == nil {
-					m.activeIdx = m.cursor
-					m.activeMode = m.selectedMode
-					m.activeCmd = cmd
-					m.activeCfgPath = configPath
+			case "up", "k":
+				if len(m.subs) == 0 {
+					return m, nil
+				}
+				if m.cursor > 0 {
+					m.cursor--
+					if m.cursor < m.offset {
+						m.offset = m.cursor
+					}
+				}
 
-					go func() { _ = cmd.Wait() }()
+			case "down", "j":
+				if len(m.subs) == 0 {
+					return m, nil
+				}
+				if m.cursor < len(m.subs)-1 {
+					m.cursor++
+					if m.cursor >= m.offset+visibleLines {
+						m.offset = m.cursor - visibleLines + 1
+					}
+				}
+
+			case "enter", "space", "right", "l":
+				if len(m.subs) == 0 {
+					return m, nil
+				}
+				m.activeSubIdx = m.cursor
+				if m.onLoadConfigs != nil {
+					cfgs, err := m.onLoadConfigs(m.subs[m.cursor].URL)
+					if err == nil {
+						m.servers = cfgs
+						m.pings = make([]string, len(cfgs))
+						for i := range m.pings {
+							m.pings[i] = "-"
+						}
+					} else {
+						m.servers = []vpn.RawConfig{}
+						m.pings = []string{}
+					}
+				}
+				m.state = stateServers
+				m.cursor = 0
+				m.offset = 0
+				return m, tea.ClearScreen
+			}
+			return m, nil
+		}
+
+		// ----------------------------------------------------
+		// SCREEN STATE: STATE_SERVERS (DRILL-DOWN CHANNELS VIEW)
+		// ----------------------------------------------------
+		if m.state == stateServers {
+			visibleLines := m.height - 8
+			if visibleLines < 1 {
+				visibleLines = 1
+			}
+
+			switch msg.String() {
+			case "ctrl+c", "q":
+				m.stopSingBox()
+				return m, tea.Quit
+
+			case "esc", "left", "h": // Drop back to top level folders list
+				m.state = stateSubs
+				m.cursor = m.activeSubIdx
+				m.offset = 0
+				return m, tea.ClearScreen
+
+			case "up", "k":
+				if len(m.servers) == 0 {
+					return m, nil
+				}
+				if m.cursor > 0 {
+					m.cursor--
+					if m.cursor < m.offset {
+						m.offset = m.cursor
+					}
+				}
+
+			case "down", "j":
+				if len(m.servers) == 0 {
+					return m, nil
+				}
+				if m.cursor < len(m.servers)-1 {
+					m.cursor++
+					if m.cursor >= m.offset+visibleLines {
+						m.offset = m.cursor - visibleLines + 1
+					}
+				}
+
+			case "p":
+				if len(m.servers) > 0 {
+					return m, m.pingAll()
+				}
+
+			case "right", "l":
+				if len(m.servers) > 0 {
+					m.pings[m.cursor] = "Ping..."
+					return m, m.pingServerCmd(m.cursor, m.servers[m.cursor].Address, m.servers[m.cursor].Port, m.servers[m.cursor].SNI)
+				}
+
+			case "t":
+				if m.selectedMode == "proxy" {
+					m.selectedMode = "tun"
+				} else {
+					m.selectedMode = "proxy"
+				}
+				return m, nil
+
+			case "enter", "space":
+				if len(m.servers) == 0 {
+					return m, nil
+				}
+				if m.activeIdx == m.cursor {
+					m.stopSingBox()
+				} else {
+					m.stopSingBox()
+
+					chosen := m.servers[m.cursor]
+					var configPath string
+					var err error
+
+					if m.selectedMode == "tun" {
+						configPath, err = vpn.BuildTunConfig(chosen)
+					} else {
+						configPath, err = vpn.BuildConfig(chosen)
+					}
+
+					if err != nil {
+						return m, nil
+					}
+
+					cmd := exec.Command(m.execPath, "run", "-c", configPath)
+					if err := cmd.Start(); err == nil {
+						m.activeIdx = m.cursor
+						m.activeMode = m.selectedMode
+						m.activeCmd = cmd
+						m.activeCfgPath = configPath
+
+						go func() { _ = cmd.Wait() }()
+					}
 				}
 			}
 		}
@@ -336,16 +416,10 @@ func (m *Model) stopSingBox() {
 	m.activeCfgPath = ""
 }
 
-func (m *Model) UpdateServers(newConfigs []vpn.RawConfig) {
-	m.servers = newConfigs
-	pings := make([]string, len(newConfigs))
-	for i := range pings {
-		pings[i] = "-"
-	}
-	m.pings = pings
+func (m *Model) UpdateSubscriptions(newSubs []storage.Subscription) {
+	m.subs = newSubs
 	m.cursor = 0
 	m.offset = 0
-	m.activeIdx = -1
 }
 
 func (m Model) View() tea.View {
@@ -357,40 +431,38 @@ func (m Model) View() tea.View {
 		MarginBottom(1)
 
 	// ----------------------------------------------------
-	// РЕНДЕРИНГ ЭКРАНА ДОБАВЛЕНИЯ ПОДПИСКИ (ОБНОВЛЕННЫЙ)
+	// FORM RENDER LAYOUT (STATE_ADD)
 	// ----------------------------------------------------
 	if m.state == stateAdd {
 		s := titleStyle.Render("➕ Add New Subscription") + "\n\n"
-
-		nameLabel := "  Название подписки:"
-		urlLabel := "  Ссылка (URL):"
+		nameLabel := "  Subscription Title:"
+		urlLabel := "  Subscription URL:"
 
 		displayFieldsStyle := lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color("7"))
-
 		var nameContent, urlContent string
 
 		if m.activeInput == 0 {
-			nameLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true).Render("> Название подписки:")
+			nameLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true).Render("> Subscription Title:")
 			nameContent = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Underline(true).Render(m.inputName)
 			urlContent = m.inputURL
 		} else {
-			urlLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true).Render("> Ссылка (URL):")
+			urlLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true).Render("> Subscription URL:")
 			nameContent = m.inputName
 			urlContent = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Underline(true).Render(m.inputURL)
 		}
 
 		if nameContent == "" {
-			nameContent = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("Введите имя...")
+			nameContent = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("Enter name...")
 		}
 		if urlContent == "" {
-			urlContent = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("Вставьте или введите ссылку...")
+			urlContent = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("Paste or type URL string...")
 		}
 
 		s += fmt.Sprintf("%s\n%s\n\n", nameLabel, displayFieldsStyle.Render(nameContent))
 		s += fmt.Sprintf("%s\n%s\n\n", urlLabel, displayFieldsStyle.Render(urlContent))
 
 		if m.inputErr != "" {
-			s += lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(fmt.Sprintf("Ошибка: %s", m.inputErr)) + "\n\n"
+			s += lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(fmt.Sprintf("Error: %s", m.inputErr)) + "\n\n"
 		}
 
 		s += lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(" Tab/Arrows: Switch | Ctrl+V: Paste | Enter: Save | Esc: Cancel")
@@ -400,24 +472,58 @@ func (m Model) View() tea.View {
 	}
 
 	// ----------------------------------------------------
-	// РЕНДЕРИНГ ОСНОВНОГО СПИСКА СЕРВЕРОВ
+	// PRIMARY MAIN SUBS LIST LAYOUT (STATE_SUBS)
+	// ----------------------------------------------------
+	if m.state == stateSubs {
+		s := titleStyle.Render("📁 GoHide VPN | Subscriptions Panels") + "\n\n"
+
+		if len(m.subs) == 0 {
+			s += lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render(" No subscriptions stored. Press 'a' to add a connection profile.") + "\n"
+		} else {
+			visibleLines := m.height - 8
+			if visibleLines < 1 {
+				visibleLines = 1
+			}
+			end := m.offset + visibleLines
+			if end > len(m.subs) {
+				end = len(m.subs)
+			}
+
+			for i := m.offset; i < end; i++ {
+				prefix := "  "
+				subName := m.subs[i].Name
+				if m.cursor == i {
+					prefix = "> "
+					subName = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Render(subName)
+				}
+				s += fmt.Sprintf("%s%s\n", prefix, subName)
+			}
+		}
+
+		s += "\n\n"
+		s += lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(" ↑/↓: Move | Enter: Expand Sub | a: Add Sub | x: Delete Sub | q: Quit")
+		v := tea.NewView(s)
+		v.AltScreen = true
+		return v
+	}
+
+	// ----------------------------------------------------
+	// NESTED TARGET SERVER ENGINES LIST LAYOUT (STATE_SERVERS)
 	// ----------------------------------------------------
 	statusStyle := lipgloss.NewStyle().Bold(true).Padding(0, 1).MarginTop(1)
-
 	modeDisplay := "PROXY"
 	if m.selectedMode == "tun" {
 		modeDisplay = "TUN"
 	}
-	s := titleStyle.Render(fmt.Sprintf("🛡️  GoHide VPN Client | Mode: %s", modeDisplay)) + "\n\n"
+	s := titleStyle.Render(fmt.Sprintf("🛡️  Servers Folder: %s | Mode: %s", m.subs[m.activeSubIdx].Name, modeDisplay)) + "\n\n"
 
 	if len(m.servers) == 0 {
-		s += lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render(" Список серверов пуст. Нажмите 'a', чтобы добавить подписку.") + "\n"
+		s += lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Render(" Remote fetch empty or endpoint parsing failed.") + "\n"
 	} else {
 		visibleLines := m.height - 8
 		if visibleLines < 1 {
 			visibleLines = 1
 		}
-
 		end := m.offset + visibleLines
 		if end > len(m.servers) {
 			end = len(m.servers)
@@ -437,26 +543,32 @@ func (m Model) View() tea.View {
 			} else if m.cursor == i {
 				nameStr = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Render(server.Name)
 			}
+
 			if m.cursor == i {
 				cursorStr = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Render("> ")
 			}
+
 			cursorBox := cursorColStyle.Render(cursorStr)
 			nameBox := nameColStyle.Render(nameStr)
 			pingBox := pingColStyle.Render(m.pings[i])
+
 			row := lipgloss.JoinHorizontal(lipgloss.Left, cursorBox, nameBox, pingBox)
 			s += row + "\n"
 		}
 	}
+
 	if m.activeIdx != -1 {
 		activeModeStr := "PROXY"
 		if m.activeMode == "tun" {
 			activeModeStr = "TUN"
 		}
-		s += statusStyle.Foreground(lipgloss.Color("10")).Render(fmt.Sprintf(" STATUS: connect to [%s] (Mode: %s)", m.servers[m.activeIdx].Name, activeModeStr))
+		s += statusStyle.Foreground(lipgloss.Color("10")).Render(fmt.Sprintf(" STATUS: connect to %s (Mode: %s)", m.servers[m.activeIdx].Name, activeModeStr))
 	} else {
 		s += statusStyle.Foreground(lipgloss.Color("7")).Render(" STATUS: VPN off")
 	}
-	s += "\n\n " + lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("↑/↓: Choose | Enter: On/Off | t: Mode | a: Add Subs | →: Ping | p: Ping All | q: Quit")
+
+	s += "\n\n " + lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("↑/↓: Choose | Enter: On/Off | t: Mode | →: Ping | p: Ping All | Esc: Back to Folders")
+
 	v := tea.NewView(s)
 	v.AltScreen = true
 	return v
